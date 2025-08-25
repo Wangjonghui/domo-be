@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8" />
+    <title>Kakao Map API 테스트</title>
+</head>
+<body>
+<div id="map" style="width:500px;height:400px;"></div>
+
+<!-- Kakao Map 지도 API 불러오기 -->
+<script type="text/javascript"
+        src="https://dapi.kakao.com/v2/maps/sdk.js?appkey=849ea9431d77eca2946f9eb92db3a0c8&libraries=services"></script>
+
+<script>
+    // 지도 생성 및 옵션 설정하기
+    var container = document.getElementById('map'); // 지도를 표시할 div
+    var options = {
+        center: new kakao.maps.LatLng(37.5665, 126.9780), // 지도 중심 좌표 (서울 시청)
+        level: 3 // 지도 확대 레벨
+    };
+    var map = new kakao.maps.Map(container, options);
+</script>
+</body>
+</html>
