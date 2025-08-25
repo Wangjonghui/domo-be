@@ -137,8 +137,7 @@ public class ItineraryService {
                 .filter(gi -> gi.placeId != null && gi.time != null && gi.time.matches("\\d{2}:\\d{2}"))
                 .collect(Collectors.toMap(gi -> gi.placeId, gi -> gi.time, (a,b)->a, LinkedHashMap::new));
 
-        picked = applyCategoryLimits(picked);
-        picked = avoidConsecutiveSameCategory(picked);
+        picked = balanceCategories(picked);
 
         return buildPlanResponseWithTimes(picked, orderIds, userLat, userLng, startAt, endAt,
                 timeById, "GPT 추천 일정(후보 화이트리스트 적용)");
@@ -352,7 +351,8 @@ public class ItineraryService {
     private List<Place> applyCategoryLimits(List<Place> places) {
         Map<String, Integer> limits = Map.of(
                 "카페", 2,
-                "놀거리", 2
+                "놀거리", 2,
+                "음식점", 2
         );
 
         Map<String, Integer> counts = new HashMap<>();
@@ -434,6 +434,44 @@ public class ItineraryService {
         int totalEst = out.stream().mapToInt(PlanResponse.Item::getEstCost).sum();
         String d = (date == null || date.isBlank()) ? today() : date;
         return new PlanResponse(d, round1(totalKm), totalEst, "", out);
+    }
+
+    private List<Place> balanceCategories(List<Place> places) {
+        Map<String, Integer> limits = Map.of(
+                "카페", 2,
+                "놀거리", 2,
+                "음식점", 2
+        );
+
+        Map<String, Integer> counts = new HashMap<>();
+        Map<String, Queue<Place>> byCat = new LinkedHashMap<>();
+        for (Place p : places) {
+            byCat.computeIfAbsent(p.getCategory(), k -> new LinkedList<>()).add(p);
+        }
+
+        List<Place> result = new ArrayList<>();
+        boolean added;
+
+        do {
+            added = false;
+            for (var entry : byCat.entrySet()) {
+                String cat = entry.getKey();
+                Queue<Place> q = entry.getValue();
+                if (!q.isEmpty()) {
+                    int used = counts.getOrDefault(cat, 0);
+                    if (!limits.containsKey(cat) || used < limits.get(cat)) {
+                        result.add(q.poll());
+                        counts.put(cat, used + 1);
+                        added = true;
+                    } else {
+                        // 이미 제한 초과면 그냥 버림
+                        q.clear();
+                    }
+                }
+            }
+        } while (added);
+
+        return result;
     }
 
     /* ===== GPT 응답 파싱 ===== */
