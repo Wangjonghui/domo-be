@@ -138,6 +138,7 @@ public class ItineraryService {
                 .collect(Collectors.toMap(gi -> gi.placeId, gi -> gi.time, (a,b)->a, LinkedHashMap::new));
 
         picked = balanceCategories(picked);
+        picked = avoidConsecutiveSameCategory(picked);
 
         return buildPlanResponseWithTimes(picked, orderIds, userLat, userLng, startAt, endAt,
                 timeById, "GPT 추천 일정(후보 화이트리스트 적용)");
@@ -189,9 +190,20 @@ public class ItineraryService {
 
         // 3) targetCategory 요청이 있으면 해당 카테고리만
         if (req.getTargetCategory() != null) {
-            String targetCategory = req.getTargetCategory().toLowerCase();
+            String targetCategory = req.getTargetCategory().trim();
+
+            // 매핑 (프론트에서 "음식" 이라고 보내도 "음식점"으로 맞춰줌)
+            if (targetCategory.equalsIgnoreCase("음식") || targetCategory.equalsIgnoreCase("식당")) {
+                targetCategory = "음식점";
+            } else if (targetCategory.equalsIgnoreCase("카페")) {
+                targetCategory = "카페";
+            } else if (targetCategory.equalsIgnoreCase("놀거리") || targetCategory.equalsIgnoreCase("액티비티")) {
+                targetCategory = "놀거리";
+            }
+
+            final String finalCat = targetCategory;
             pool = pool.stream()
-                    .filter(p -> targetCategory.equalsIgnoreCase(p.getCategory()))
+                    .filter(p -> finalCat.equalsIgnoreCase(p.getCategory()))
                     .toList();
         }
 
