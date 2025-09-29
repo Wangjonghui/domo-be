@@ -10,7 +10,9 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.time.LocalTime;
 import java.time.format.DateTimeFormatter;
@@ -159,7 +161,6 @@ public class ItineraryService {
                 .map(String::toLowerCase)
                 .toList();
 
-        // 1) excludePlaceId 누적 반영
         if (req.getExcludePlaceId() != null) {
             excludeIds.add(req.getExcludePlaceId());
         }
@@ -176,7 +177,6 @@ public class ItineraryService {
             if (!pool.isEmpty()) break;
         }
 
-        // 2) exclude 전체 반영 (누적 + req.getExclude())
         Set<String> allExcluded = new HashSet<>(excludeIds);
         if (req.getExclude() != null) {
             allExcluded.addAll(req.getExclude().stream()
@@ -188,11 +188,9 @@ public class ItineraryService {
                 .filter(p -> p.getPlaceId() != null && !allExcluded.contains(p.getPlaceId()))
                 .toList();
 
-        // 3) targetCategory 요청이 있으면 해당 카테고리만
         if (req.getTargetCategory() != null) {
             String targetCategory = req.getTargetCategory().trim();
 
-            // 매핑 (프론트에서 "음식" 이라고 보내도 "음식점"으로 맞춰줌)
             if (targetCategory.equalsIgnoreCase("음식") || targetCategory.equalsIgnoreCase("식당")) {
                 targetCategory = "음식점";
             } else if (targetCategory.equalsIgnoreCase("카페")) {
@@ -209,7 +207,6 @@ public class ItineraryService {
 
         if (pool.isEmpty()) throw new IllegalStateException("추천 가능한 후보가 없습니다.");
 
-        // 4) 랜덤으로 하나 선택
         Place picked = pool.get(new Random().nextInt(pool.size()));
         return picked.getPlaceId();
     }
@@ -229,10 +226,20 @@ public class ItineraryService {
         Integer finalCost    = (target.est_cost == null ? 0 : target.est_cost);
 
         if (req.new_place_id != null && !req.new_place_id.isBlank()) {
-            var np = supabaseService.fetchByPlaceId(req.new_place_id)
-                    .orElseThrow(() -> new IllegalArgumentException("place not found: " + req.new_place_id));
-            finalPlaceId = np.getPlaceId();
+            var oldPlace = supabaseService.fetchByPlaceId(target.place_id)
+                    .orElseThrow(() -> new IllegalArgumentException("기존 장소를 찾을 수 없습니다: " + target.place_id));
+
+            var newPlace = supabaseService.fetchByPlaceId(req.new_place_id)
+                    .orElseThrow(() -> new IllegalArgumentException("새로운 장소를 찾을 수 없습니다: " + req.new_place_id));
+
+
+            if (oldPlace.getCategory().equalsIgnoreCase(newPlace.getCategory())) {
+                throw new ResponseStatusException(HttpStatus.CONFLICT, "동일한 카테고리의 장소로는 변경할 수 없습니다.");
+            }
+
+            finalPlaceId = newPlace.getPlaceId();
         }
+
         if (req.new_time != null) finalTime = req.new_time;
         if (req.new_note != null) finalNote = req.new_note;
         if (req.new_est_cost != null) finalCost = req.new_est_cost;
@@ -268,7 +275,6 @@ public class ItineraryService {
 
     /* ================================== 내부 헬퍼 ================================== */
 
-    /** 중심 좌표: userLat/Lng → code(placeId) → 서울시청 */
     private double[] resolveCenter(PlanRequest req) {
         Double uLat = req.getUserLat();
         Double uLng = req.getUserLng();
@@ -292,7 +298,7 @@ public class ItineraryService {
         return new double[]{ 37.5665, 126.9780 };
     }
 
-    /** DB가 실패할 때 자바에서 반경/카테고리 필터 폴백 */
+
     private List<Place> filterByRadiusInMemory(List<Place> src, double lat, double lng,
                                                double radiusKm, List<String> categories) {
         if (src == null || src.isEmpty()) return List.of();
@@ -382,34 +388,31 @@ public class ItineraryService {
         return result;
     }
     private List<Place> avoidConsecutiveSameCategory(List<Place> places) {
-        if (places.isEmpty()) return places;
+        if (places.size() < 2) {
+            return places;
+        }
 
-        List<Place> result = new ArrayList<>();
-        result.add(places.get(0));
+        List<Place> result = new ArrayList<>(places);
 
-        for (int i = 1; i < places.size(); i++) {
-            Place current = places.get(i);
-            Place prev = result.get(result.size() - 1);
+        for (int i = 1; i < result.size(); i++) {
+            Place prev = result.get(i - 1);
+            Place current = result.get(i);
 
-            if (prev.getCategory().equals(current.getCategory())) {
-                // 다른 카테고리 나올 때까지 앞으로 당기기
+            if (prev.getCategory().equalsIgnoreCase(current.getCategory())) {
+
                 int swapIndex = -1;
-                for (int j = i + 1; j < places.size(); j++) {
-                    if (!places.get(j).getCategory().equals(prev.getCategory())) {
+                for (int j = i + 1; j < result.size(); j++) {
+                    if (!result.get(j).getCategory().equalsIgnoreCase(prev.getCategory())) {
                         swapIndex = j;
                         break;
                     }
                 }
+
                 if (swapIndex != -1) {
-                    // 위치 교환
-                    Place tmp = places.get(swapIndex);
-                    places.set(swapIndex, current);
-                    current = tmp;
+                    Collections.swap(result, i, swapIndex);
                 }
             }
-            result.add(current);
         }
-
         return result;
     }
 
